@@ -34,3 +34,38 @@ By default, it only processes lines that are blank, so that way if you missed di
 you can add new blank lines to the subtitle file, and the program will only process those lines.  Then it will
 incorporate the new whisper text into the working subtitle file.
 
+
+usage: whisper-movie-subtitles.py [-h] [-min MIN] [-max MAX] [-t AUDIO_FILE]
+                                  [-r] [-f--force] [-e | -s | -b | -f | -y]
+                                  subtitle_file
+
+Whisper preprocessing tool.
+
+positional arguments:
+  subtitle_file         path to existing (dummy) subtitle file
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -min MIN              minimum delay between clips in seconds (defaults to
+                        .75 second)
+  -max MAX              maximum delay between clips in seconds (defaults to
+                        1.25 second)
+  -t AUDIO_FILE, --audio-file AUDIO_FILE
+                        The temporary audio file to create. It defaults to
+                        clip.mp3. It can be a wav or mp3
+  -r, --redo            Uses lines even if there is already text in the
+                        subtitle. Otherwise only blank lines are used
+  -f--force             If there are multiple subtitles for a single line,
+                        concatenate them together instead of creating separate
+                        lines
+  -e, --extract         Extracts audio from a video that matches the subtitle
+                        times, separated by silence between clips, and saves
+                        it to the temporary file
+  -s, --subtitles       Takes the new .srt file(s), and adjusts them back to
+                        the original timing
+  -b, --both            Runs the extract option, pauses, then continues with
+                        the subtitles. This is the default action
+  -f, --force           This will indicate that clips should be concatenated
+                        together if Whisper generates multiplesubtitles for a
+                        single source line. Normally multiple lines are used.
+  -y, --overwrite       Automatically overwrite files that already exist
