@@ -223,10 +223,11 @@ def main():
                        help='Runs the extract option, pauses, then continues with the subtitles. '
                             'This is the default action')
     group.add_argument('-f', '--force', action='store_true',
-                       help='This will indicate that clips should be concatenated together if Whisper generates multiple'
-                            'subtitles for a single source line. Normally multiple lines are used.')
-    group.add_argument('-y', '--overwrite', action='store_true', help='Automatically overwrite files that already exist')
-    args = parser.parse_args(["-h"])
+                       help='This will indicate that clips should be concatenated together if Whisper generates '
+                            'multiple subtitles for a single source line. Normally multiple lines are used.')
+    group.add_argument('-y', '--overwrite', action='store_true', help='Automatically overwrite files that already '
+                                                                      'exist')
+    args = parser.parse_args()
 
     input_srt = args.subtitle_file
     temp_file = args.audio_file
