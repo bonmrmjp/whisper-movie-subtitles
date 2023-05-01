@@ -10,7 +10,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'my_script=whisper-movie-subtitles:main',
+            'whisper-movie-subtitles=whisper-movie-subtitles:main',
         ],
     },
 )
