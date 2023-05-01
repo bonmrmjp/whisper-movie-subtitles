@@ -186,81 +186,85 @@ def write_new_subs(subtitle_file_clipped, subtitle_file_original, _output_file, 
     print(f'created {_output_file}')
 
 
-# Usage example
+def main():
+    global overwrite
+    parser = argparse.ArgumentParser(description="""
+    Whisper preprocessing tool. 
+    This gets around an issue where Whisper doesn't deal well with long periods without speaking.  Also, if there's music 
+    or sound effects, Whisper gets confused on when speech starts.  To use this, create a srt subtitle file, with subtitles 
+    defined only where there is talking.  You can either carefully do the timing to match where you want the breaks, or 
+    else do longer sections and let Whisper determine where the breaks should be. If there is music or background noise, 
+    you may find that Whisper does better if the clips are quite small and contain only the bit there is talking.  
+    Sections without much background noise can usually be one long clip since those sections are easier for Whisper to get 
+    right without help. The text of the subtitles can be left blank. This outputs a mp3 file with just the spoken parts that
+    can be transcribed or translated with Whisper or other speech to text programs. Finally, the resulting srt file will 
+    be converted back to the original video timing.
+                                    """)
+    parser.add_argument('subtitle_file', type=str, help='path to existing (dummy) subtitle file')
+    parser.add_argument('-min', type=float, default=.75,
+                        help='minimum delay between clips in seconds (defaults to .75 second)')
+    parser.add_argument('-max', type=float, default=1.25,
+                        help='maximum delay between clips in seconds (defaults to 1.25 second)')
 
-parser = argparse.ArgumentParser(description="""
-Whisper preprocessing tool. 
-This gets around an issue where Whisper doesn't deal well with long periods without speaking.  Also, if there's music 
-or sound effects, Whisper gets confused on when speech starts.  To use this, create a srt subtitle file, with subtitles 
-defined only where there is talking.  You can either carefully do the timing to match where you want the breaks, or 
-else do longer sections and let Whisper determine where the breaks should be. If there is music or background noise, 
-you may find that Whisper does better if the clips are quite small and contain only the bit there is talking.  
-Sections without much background noise can usually be one long clip since those sections are easier for Whisper to get 
-right without help. The text of the subtitles can be left blank. This outputs a mp3 file with just the spoken parts that
-can be transcribed or translated with Whisper or other speech to text programs. Finally, the resulting srt file will 
-be converted back to the original video timing.
-                                """)
-parser.add_argument('subtitle_file', type=str, help='path to existing (dummy) subtitle file')
-parser.add_argument('-min', type=float, default=.75,
-                    help='minimum delay between clips in seconds (defaults to .75 second)')
-parser.add_argument('-max', type=float, default=1.25,
-                    help='maximum delay between clips in seconds (defaults to 1.25 second)')
+    parser.add_argument('-t', '--audio-file', type=str, default="clip.mp3",
+                        help="The temporary audio file to create. It defaults to clip.mp3. It can be a wav or mp3")
+    parser.add_argument('-r', '--redo', action="store_true", help="Uses lines even if there is already text in "
+                                                                  "the subtitle. Otherwise only blank lines are used")
+    parser.add_argument('-f' '--force', action="store_true", help="If there are multiple subtitles for a single line, "
+                                                                  "concatenate them together instead of creating separate "
+                                                                  "lines")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-e', '--extract', action='store_true',
+                       help='Extracts audio from a video that matches the subtitle times, separated by silence '
+                            'between clips, and saves it to the temporary file')
+    group.add_argument('-s', '--subtitles', action='store_true',
+                       help='Takes the new .srt file(s), and adjusts them back to the original timing')
+    group.add_argument('-b', '--both', action='store_true',
+                       help='Runs the extract option, pauses, then continues with the subtitles. '
+                            'This is the default action')
+    group.add_argument('-f', '--force', action='store_true',
+                       help='This will indicate that clips should be concatenated together if Whisper generates multiple'
+                            'subtitles for a single source line. Normally multiple lines are used.')
+    group.add_argument('-y', '--overwrite', action='store_true', help='Automatically overwrite files that already exist')
+    args = parser.parse_args(["-h"])
 
-parser.add_argument('-t', '--audio-file', type=str, default="clip.mp3",
-                    help="The temporary audio file to create. It defaults to clip.mp3. It can be a wav or mp3")
-parser.add_argument('-r', '--redo', action="store_true", help="Uses lines even if there is already text in "
-                                                              "the subtitle. Otherwise only blank lines are used")
-parser.add_argument('-f' '--force', action="store_true", help="If there are multiple subtitles for a single line, "
-                                                              "concatenate them together instead of creating separate "
-                                                              "lines")
-group = parser.add_mutually_exclusive_group()
-group.add_argument('-e', '--extract', action='store_true',
-                   help='Extracts audio from a video that matches the subtitle times, separated by silence '
-                        'between clips, and saves it to the temporary file')
-group.add_argument('-s', '--subtitles', action='store_true',
-                   help='Takes the new .srt file(s), and adjusts them back to the original timing')
-group.add_argument('-b', '--both', action='store_true',
-                   help='Runs the extract option, pauses, then continues with the subtitles. '
-                        'This is the default action')
-group.add_argument('-f', '--force', action='store_true',
-                   help='This will indicate that clips should be concatenated together if Whisper generates multiple'
-                        'subtitles for a single source line. Normally multiple lines are used.')
-group.add_argument('-y', '--overwrite', action='store_true', help='Automatically overwrite files that already exist')
-args = parser.parse_args()
+    input_srt = args.subtitle_file
+    temp_file = args.audio_file
+    input_video = find_matching_video(input_srt)
+    temp_file_base = os.path.splitext(temp_file)[0]
+    overwrite = args.overwrite
+    both = args.both or (not args.extract and not args.subtitles)
+    print(f"Processing {input_srt}...")
+    print(f'Video file: {input_video}')
+    print(f'Audio file: {temp_file}')
+    print(f'Silence between clips: {args.min} - {args.max} seconds')
 
-input_srt = args.subtitle_file
-temp_file = args.audio_file
-input_video = find_matching_video(input_srt)
-temp_file_base = os.path.splitext(temp_file)[0]
-overwrite = args.overwrite
-both = args.both or (not args.extract and not args.subtitles)
-print(f"Processing {input_srt}...")
-print(f'Video file: {input_video}')
-print(f'Audio file: {temp_file}')
-print(f'Silence between clips: {args.min} - {args.max} seconds')
+    audio_clip = extract_speech(input_srt, input_video, args.min, args.max, args.redo)
+    print("Clipped Duration : ", format_time(audio_clip.duration))
+    if args.extract or both:
+        if not should_overwrite_file(temp_file):
+            print("not overwriting the audio file:", temp_file)
+        else:
+            # the param specifies CBR encoding, which keeps the timing accurate
+            audio_clip.write_audiofile(temp_file, ffmpeg_params=["-b:a", "160k"])
+        print(f"The File '{temp_file}' is ready. Now create one or more {temp_file_base}*.srt "
+              f"and put them in the directory with the clip")
+    if both:
+        input("Press Enter when ready to create the adjusted subtitle files")
+        print()
+    if args.subtitles or both:
+        base_path = os.path.splitext(temp_file)[0]
+        for subtitle in find_subtitles(os.path.abspath(temp_file)):
+            output_file = os.path.splitext(input_video)[0] + subtitle
+            actual_duration = AudioFileClip(temp_file).duration
+            adjust = audio_clip.duration / actual_duration
+            if abs(audio_clip.duration - actual_duration) > 1:
+                # Depending on the audio codec, the actual audio length might be slightly off.  If so, this
+                # will compensate for it.
+                print(f"Audio file length is off. length is {format_time(actual_duration)}, "
+                      f"expecting {format_time(audio_clip.duration)}, adjusting by {adjust}")
+            write_new_subs(base_path + subtitle, input_srt, output_file, args.min, args.max, args.redo, args.force, adjust)
 
-audio_clip = extract_speech(input_srt, input_video, args.min, args.max, args.redo)
-print("Clipped Duration : ", format_time(audio_clip.duration))
-if args.extract or both:
-    if not should_overwrite_file(temp_file):
-        print("not overwriting the audio file:", temp_file)
-    else:
-        # the param specifies CBR encoding, which keeps the timing accurate
-        audio_clip.write_audiofile(temp_file, ffmpeg_params=["-b:a", "160k"])
-    print(f"The File '{temp_file}' is ready. Now create one or more {temp_file_base}*.srt "
-          f"and put them in the directory with the clip")
-if both:
-    input("Press Enter when ready to create the adjusted subtitle files")
-    print()
-if args.subtitles or both:
-    base_path = os.path.splitext(temp_file)[0]
-    for subtitle in find_subtitles(os.path.abspath(temp_file)):
-        output_file = os.path.splitext(input_video)[0] + subtitle
-        actual_duration = AudioFileClip(temp_file).duration
-        adjust = audio_clip.duration / actual_duration
-        if abs(audio_clip.duration - actual_duration) > 1:
-            # Depending on the audio codec, the actual audio length might be slightly off.  If so, this
-            # will compensate for it.
-            print(f"Audio file length is off. length is {format_time(actual_duration)}, "
-                  f"expecting {format_time(audio_clip.duration)}, adjusting by {adjust}")
-        write_new_subs(base_path + subtitle, input_srt, output_file, args.min, args.max, args.redo, args.force, adjust)
+
+if __name__ == '__main__':
+    main()
