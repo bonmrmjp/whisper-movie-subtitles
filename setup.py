@@ -6,7 +6,7 @@ setup(
 #    packages=find_packages(),
     py_modules=['whisper-movie-subtitles'],    
     entry_points={
-        'console_scripts': ['whisper-movie-subtitles=whisper_movie_subtitles:main']
+        'console_scripts': ['whisper-movie-subtitles=whisper-movie-subtitles:main']
     },
     install_requires=[
         'argparse',
