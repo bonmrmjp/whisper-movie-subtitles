@@ -221,7 +221,7 @@ def main():
                        help='Takes the new .srt file(s), and adjusts them back to the original timing')
     group.add_argument('-b', '--both', action='store_true',
                        help='Runs the extract option, pauses, then continues with the subtitles. '
-                            'This is the default action')
+                            'This is the default action'),
     group.add_argument('-f', '--force', action='store_true',
                        help='This will indicate that clips should be concatenated together if Whisper generates '
                             'multiple subtitles for a single source line. Normally multiple lines are used.')
