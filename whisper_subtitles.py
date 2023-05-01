@@ -62,7 +62,10 @@ def find_matching_video(srt_path):
     match = re.search(r'\.[a-zA-Z]{2,3}$', base_name)
     if match:
         base_name = base_name[:match.start()]
-    for file_name in os.listdir(os.path.dirname(srt_path)):
+    path = os.path.dirname(srt_path)
+    if not path:
+        path = '.'
+    for file_name in os.listdir(path):
         if os.path.basename(file_name).startswith(base_name) and os.path.splitext(file_name)[1] != '.srt':
             return os.path.join(os.path.dirname(srt_path), file_name)
     print("Could not find a video file that matches", srt_path, file=sys.stderr)
@@ -94,8 +97,12 @@ def calc_delay(min_delay, max_delay, running_time, duration):
 
 def extract_speech(srt_file, video_file, min_delay, max_delay, redo):
     time_ranges = read_subtitle_file(srt_file, redo)
-    video = mp.VideoFileClip(video_file)
-    audio = video.audio
+    try:
+        video = mp.VideoFileClip(video_file)
+        audio = video.audio
+    except:
+        # The file could be just an audio file
+        audio = mp.AudioFileClip(video_file)
 
     running_length = 0.0
     audio_clips = []
