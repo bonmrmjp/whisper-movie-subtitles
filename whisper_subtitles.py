@@ -1,16 +1,15 @@
+import re
+import os
 import argparse
 import datetime
-import os
-import re
 import sys
 from types import SimpleNamespace
 import moviepy.editor as mp
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 
-
-# Extracts audio from a video that matches the subtitle times, and puts a 1 second of silence between clips,
+# Extracts audio from a video that matches the subtitle times, and puts silence between clips,
 # Then pauses execution to run speech to text.
-# Finally, takes the new .srt file(s), and adjusts them back to the original timing.
+# Finally, takes the new .srt file(s), and adjusts the timing back to the original.
 
 
 def interpolate(x1, y1, x2, y2, x):
@@ -49,8 +48,12 @@ def read_subtitle_file(subtitle_file, _all):
 def should_overwrite_file(filename):
     global overwrite
     if not overwrite and os.path.exists(filename):
-        response = input(f"The file '{filename}' already exists.\nDo you want to overwrite it? (y/n) ")
-        return response.lower() == 'y'
+        while True:
+            response = input(f"The file '{filename}' already exists.\nDo you want to overwrite it? (y/n) ")
+            if response.lower() == 'y':
+                return True
+            if response.lower() == 'n':
+                return False
     else:
         return True
 
@@ -82,20 +85,7 @@ def find_subtitles(file):
     return result
 
 
-# calculates the delay to use, trying to get as close to ending on a 2 second
-# mark, but staying within the max & min delays. Whisper large model usually reports
-# times in 2 second intervals, so this helps it to agree with the clips.
-def calc_delay(min_delay, max_delay, running_time, duration):
-    avg_delay = (min_delay + max_delay) / 2
-    max_offset = (max_delay - min_delay) / 2
-    running_time += duration + avg_delay
-    fraction = running_time % 2
-    if fraction >= 1:
-        fraction -= 2
-    return avg_delay + -min(fraction, max_offset)
-
-
-def extract_speech(srt_file, video_file, min_delay, max_delay, redo):
+def extract_speech(srt_file, video_file, delay, redo):
     time_ranges = read_subtitle_file(srt_file, redo)
     try:
         video = mp.VideoFileClip(video_file)
@@ -103,12 +93,12 @@ def extract_speech(srt_file, video_file, min_delay, max_delay, redo):
     except:
         # The file could be just an audio file
         audio = mp.AudioFileClip(video_file)
-
+    print("Original duration: ", format_time(audio.duration))
     running_length = 0.0
     audio_clips = []
     for line in time_ranges:
         clip = audio.subclip(line.start, line.end)
-        silence_duration = calc_delay(min_delay, max_delay, running_length, clip.duration)
+        silence_duration = delay
         silence = mp.AudioClip(lambda _: 0, duration=silence_duration / 2.0, fps=audio.fps)
         if silence_duration:
             audio_clips.append(silence)
@@ -119,41 +109,58 @@ def extract_speech(srt_file, video_file, min_delay, max_delay, redo):
     return mp.concatenate_audioclips(audio_clips)
 
 
-# Find the subtitle segment that contains the clipped timestamp
-def clipped_time_to_original_time(clipped_time, subtitle_timestamps, min_delay, max_delay):
+# Find the subtitle segment(s) that contains the clipped timestamp
+def clipped_time_to_original_time(start, end, subtitle_timestamps, delay):
+    half = (end - start) / 2
     pos = 0.0
-    i = 0
+    retval = []
     for i, s in enumerate(subtitle_timestamps):
         duration = s.end - s.start
-        duration += calc_delay(min_delay, max_delay, pos, duration)
+        duration += delay
+        clip_end = pos + duration
+        if min(end, clip_end) - max(start, pos) >= min(half, duration / 2):
+            retval.append(i)
         pos += duration
-        if pos >= clipped_time:
-            return i
-    return -1
+    return retval
+
+
+def find_clips(start, end, subtitle_timestamps):
+    pos = []
+    half = (end - start) / 2
+    for i, s in enumerate(subtitle_timestamps):
+        if min(end, s.end) - max(start, s.start) >= min(half, (s.end - s.start) / 2):
+            pos.append(i)
+    return pos
 
 
 # writes a new subtitle file with the original video timing
-def write_new_subs(subtitle_file_clipped, subtitle_file_original, _output_file, min_delay, max_delay, redo, _force,
-                   adjust):
-    subtitle_timestamps_original = read_subtitle_file(subtitle_file_original, redo)
+def write_new_subs(subtitle_file_clipped, subtitle_file_original, _output_file, delay, redo, _force,
+                   adjust, use_original_time):
+    subtitle_timestamps_original_clipped = read_subtitle_file(subtitle_file_original, redo)
     subtitle_timestamps_clipped = read_subtitle_file(subtitle_file_clipped, True)
 
     # There might be multiple subtitles for a single original subtitle.  So we do some extra work
-    # so that the multiple lines will fit exactly into the original segment..
+    # so that the multiple lines will fit exactly into the original segment.
+    # also handle cases where whisper response spans multiple segments.
     blocks = {}
     # get a list of subtitles for each segment
     for _subtitle in subtitle_timestamps_clipped:
-        middle = (_subtitle.start + _subtitle.end) / 2 * adjust
-        pos = clipped_time_to_original_time(middle, subtitle_timestamps_original, min_delay, max_delay)
-        start = subtitle_timestamps_original[pos].start
+        start = _subtitle.start * adjust
+        end = _subtitle.end * adjust
+        if use_original_time:
+            pos = find_clips(start, end, subtitle_timestamps_original_clipped)
+        else:
+            pos = clipped_time_to_original_time(start, end, subtitle_timestamps_original_clipped, delay)
+        start = subtitle_timestamps_original_clipped[pos[0]].start
+        _subtitle.span = len(pos)
         if start not in blocks:
             blocks.update({start: []})
         if _force:
             if blocks[start]:
-                line = blocks[start][0]
+                line = blocks[start][0][0]
                 if line.text:
                     line.text += '\n'
-                line += _subtitle.text
+                line.text += _subtitle.text
             else:
                 blocks[start].append(_subtitle)
         else:
@@ -170,26 +177,33 @@ def write_new_subs(subtitle_file_clipped, subtitle_file_original, _output_file, 
         if subtitle_timestamps_original[0].start == 0 and "Whisper (AI)" in subtitle_timestamps_original[0].text:
             subtitle_timestamps_original = subtitle_timestamps_original[1:]
         i = 1
-        line = f'{i}\n{format_time(0)} --> {format_time(2)}\nWhisper (AI) derived text on {datetime.date.today()}\n\n'
+        line = f'{i}\n{format_time(0)} --> {format_time(0)}\nWhisper (AI) derived text on {datetime.date.today()}.\n\n'
         f.write(line)
-
-        for original in subtitle_timestamps_original:
+        skip_next = 0
+        for j, original in enumerate(subtitle_timestamps_original):
             if original.start in blocks:
                 _list = blocks[original.start]
                 # If there's multiple subtitles in a block, adjust the timings to match the original block.
                 _min = _list[0].start
                 _max = _list[-1].end
+                span = _list[0].span
+                original_end = subtitle_timestamps_original[j + span - 1].end
+                if span > 1:
+                    skip_next = span
                 for sub in _list:
                     i += 1
-                    start = interpolate(_min, original.start, _max, original.end, sub.start)
-                    end = interpolate(_min, original.start, _max, original.end, sub.end)
+                    start = interpolate(_min, original.start, _max, original_end, sub.start)
+                    end = interpolate(_min, original.start, _max, original_end, sub.end)
                     line = f'{i}\n{format_time(start)} --> {format_time(end)}\n{sub.text}\n\n'
                     f.write(line)
             else:
-                i += 1
-                # Write the original blank line if there wasn't a match found
-                line = f'{i}\n{format_time(original.start)} --> {format_time(original.end)}\n{original.text}\n\n'
-                f.write(line)
+                if skip_next == 0:
+                    i += 1
+                    # Write the original blank line if there wasn't a match found
+                    line = f'{i}\n{format_time(original.start)} --> {format_time(original.end)}\n{original.text}\n\n'
+                    f.write(line)
+            if skip_next > 0:
+                skip_next -= 1
     print(f'created {_output_file}')
 
 
@@ -197,29 +211,28 @@ def main():
     global overwrite
     parser = argparse.ArgumentParser(description="""
     Whisper preprocessing tool. 
-    This gets around an issue where Whisper doesn't deal well with long periods without speaking.  Also, if there's music 
-    or sound effects, Whisper gets confused on when speech starts.  To use this, create a srt subtitle file, with subtitles 
-    defined only where there is talking.  You can either carefully do the timing to match where you want the breaks, or 
-    else do longer sections and let Whisper determine where the breaks should be. If there is music or background noise, 
-    you may find that Whisper does better if the clips are quite small and contain only the bit there is talking.  
-    Sections without much background noise can usually be one long clip since those sections are easier for Whisper to get 
-    right without help. The text of the subtitles can be left blank. This outputs a mp3 file with just the spoken parts that
-    can be transcribed or translated with Whisper or other speech to text programs. Finally, the resulting srt file will 
-    be converted back to the original video timing.
+    This gets around an issue where Whisper doesn't deal well with long periods without speaking.  Also, if there's 
+    music or sound effects, Whisper gets confused on when speech starts.  To use this, create a srt subtitle file, with 
+    subtitles defined only where there is talking.  You can either carefully do the timing to match where you want the 
+    breaks, or else do longer sections and let Whisper determine where the breaks should be. If there is music or 
+    background noise, you may find that Whisper does better if the clips are quite small and contain only the bit there
+    is talking. Sections without much background noise can usually be one long clip since those sections are easier for 
+    Whisper to get right without help. The text of the subtitles can be left blank. This outputs an audio file with 
+    just the spoken parts that can be transcribed or translated with Whisper or other speech to text programs. Finally, 
+    the resulting srt file will be converted back to the original video timing. For best results use in conjunction 
+    with "--word_timestamps True" on the Whisper command. 
                                     """)
     parser.add_argument('subtitle_file', type=str, help='path to existing (dummy) subtitle file')
-    parser.add_argument('-min', type=float, default=.75,
-                        help='minimum delay between clips in seconds (defaults to .75 second)')
-    parser.add_argument('-max', type=float, default=1.25,
-                        help='maximum delay between clips in seconds (defaults to 1.25 second)')
-
-    parser.add_argument('-t', '--audio-file', type=str, default="clip.mp3",
-                        help="The temporary audio file to create. It defaults to clip.mp3. It can be a wav or mp3")
+    parser.add_argument('-d', '--delay', type=float, default=1.2,
+                        help='delay between clips in seconds (defaults to 1.2 seconds)')
+    parser.add_argument('-t', '--audio-file', type=str, default="clip.flac",
+                        help="The temporary audio file to create. It defaults to clip.flac. It can be a wav, mp3, or "
+                             "flac")
     parser.add_argument('-r', '--redo', action="store_true", help="Uses lines even if there is already text in "
                                                                   "the subtitle. Otherwise only blank lines are used")
-    parser.add_argument('-f' '--force', action="store_true", help="If there are multiple subtitles for a single line, "
-                                                                  "concatenate them together instead of creating separate "
-                                                                  "lines")
+    parser.add_argument('-f', '--force', action="store_true", help="If there are multiple subtitles for a single line, "
+                                                                   "concatenate them together instead of creating "
+                                                                   "separate lines")
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-e', '--extract', action='store_true',
                        help='Extracts audio from a video that matches the subtitle times, separated by silence '
@@ -229,11 +242,11 @@ def main():
     group.add_argument('-b', '--both', action='store_true',
                        help='Runs the extract option, pauses, then continues with the subtitles. '
                             'This is the default action'),
-    group.add_argument('-f', '--force', action='store_true',
-                       help='This will indicate that clips should be concatenated together if Whisper generates '
-                            'multiple subtitles for a single source line. Normally multiple lines are used.')
-    group.add_argument('-y', '--overwrite', action='store_true', help='Automatically overwrite files that already '
-                                                                      'exist')
+    parser.add_argument('--sync', type=str, help="This feature will take a subtitle file that is -roughly in sync "
+                                                       "and force the subtitle times to match with the source subtitle "
+                                                       "the result will overwrite the source"),
+    parser.add_argument('-y', '-y', '--overwrite', action='store_true', help='Automatically overwrite files that already '
+                                                                       'exist')
     args = parser.parse_args()
 
     input_srt = args.subtitle_file
@@ -245,21 +258,29 @@ def main():
     print(f"Processing {input_srt}...")
     print(f'Video file: {input_video}')
     print(f'Audio file: {temp_file}')
-    print(f'Silence between clips: {args.min} - {args.max} seconds')
+    print(f'Silence between clips: {args.delay} seconds')
 
-    audio_clip = extract_speech(input_srt, input_video, args.min, args.max, args.redo)
-    print("Clipped Duration : ", format_time(audio_clip.duration))
+    audio_clip = extract_speech(input_srt, input_video, args.delay, args.redo)
+    print("Clipped duration : ", format_time(audio_clip.duration))
     if args.extract or both:
         if not should_overwrite_file(temp_file):
             print("not overwriting the audio file:", temp_file)
         else:
-            # the param specifies CBR encoding, which keeps the timing accurate
-            audio_clip.write_audiofile(temp_file, ffmpeg_params=["-b:a", "160k"])
+            if temp_file.endswith(".flac"):
+                # convert to mono, then flac which is lossless
+                audio_clip.write_audiofile(temp_file, codec="flac", ffmpeg_params=["-ac", "1"])
+            elif temp_file.endswith(".mp3"):
+                # the param specifies CBR encoding, which keeps the timing accurate
+                audio_clip.write_audiofile(temp_file, ffmpeg_params=["-b:a", "160k", "-ac", "1"])
+            else:
+                audio_clip.write_audiofile(temp_file, ffmpeg_params=["-ac", "1"])
+
         print(f"The File '{temp_file}' is ready. Now create one or more {temp_file_base}*.srt "
               f"and put them in the directory with the clip")
     if both:
         input("Press Enter when ready to create the adjusted subtitle files")
         print()
+    adjust = 1
     if args.subtitles or both:
         base_path = os.path.splitext(temp_file)[0]
         for subtitle in find_subtitles(os.path.abspath(temp_file)):
@@ -271,7 +292,10 @@ def main():
                 # will compensate for it.
                 print(f"Audio file length is off. length is {format_time(actual_duration)}, "
                       f"expecting {format_time(audio_clip.duration)}, adjusting by {adjust}")
-            write_new_subs(base_path + subtitle, input_srt, output_file, args.min, args.max, args.redo, args.force, adjust)
+            write_new_subs(base_path + subtitle, input_srt, output_file, args.delay, args.redo, args.force, adjust,
+                           False)
+    if args.sync:
+        write_new_subs(args.sync, input_srt, args.sync, args.delay, args.redo, args.force, adjust, True)
 
 
 if __name__ == '__main__':
