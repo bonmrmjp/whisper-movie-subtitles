@@ -19,12 +19,13 @@ once to get to get the English, and another run to get the original language.
 
 Next, the program takes the clipped subtitles and converts the timing back to the original. If there
 are multiple lines that Whisper made for a single entry, the durations will be adjusted so they start and stop at
-the original entry.  It does this for both the translated version and the original.
+the original entry.  It does this for both the translated version and the original.  It also handles cases where
+Whisper spans multiple clips.
 
 There may be sections where the timing got off, so the the subtitles end up in the wrong stop. You can
-either just adjust them, or else bring up the clipped file in Subtitle Edit, and move the entries that are off by
-looking at the waveform. It doesn't have to be perfect since if the middle of the subtitle is in the right block it will
-end up in the right place.  But generally, there aren't many bad placements.
+either just adjust them afterwards, or else bring up the clipped file in Subtitle Edit, and move the entries that are 
+off by looking at the waveform. It doesn't have to be perfect since if the middle of the subtitle is in the right block 
+it will end up in the right place.  But generally, there aren't many bad placements.
 
 So after doing this you have an original language and English subtitle files, which should pretty closely agree with
 each other, with accurate timings.  There may be empty translations, which means those sections weren't
@@ -35,37 +36,52 @@ you can add new blank lines to the subtitle file, and the program will only proc
 incorporate the new whisper text into the working subtitle file.
 
 
-     usage: whisper-movie-subtitles.py [-h] [-min MIN] [-max MAX] [-t AUDIO_FILE]
-                                  [-r] [-f--force] [-e | -s | -b | -f | -y]
-                                  subtitle_file
+  usage: whisper_subtitles.py [-h] [-d DELAY] [-t AUDIO_FILE] [-r] [-f]
+                              [-e | -s | -b] [--sync SYNC] [-y]
+                              subtitle_file
 
-     Whisper preprocessing tool.
+Whisper preprocessing tool. This gets around an issue where Whisper doesn't
+deal well with long periods without speaking. Also, if there's music or sound
+effects, Whisper gets confused on when speech starts. To use this, create a
+srt subtitle file, with subtitles defined only where there is talking. You can
+either carefully do the timing to match where you want the breaks, or else do
+longer sections and let Whisper determine where the breaks should be. If there
+is music or background noise, you may find that Whisper does better if the
+clips are quite small and contain only the bit there is talking. Sections
+without much background noise can usually be one long clip since those
+sections are easier for Whisper to get right without help. The text of the
+subtitles can be left blank. This outputs an audio file with just the spoken
+parts that can be transcribed or translated with Whisper or other speech to
+text programs. Finally, the resulting srt file will be converted back to the
+original video timing. For best results use in conjunction with "--
+word_timestamps True" on the Whisper command.
 
-     positional arguments:
-       subtitle_file         path to existing (dummy) subtitle file
+  positional arguments:
+    subtitle_file         path to existing (dummy) subtitle file
 
-     optional arguments:
-       -h, --help            show this help message and exit
-       -min MIN              minimum delay between clips in seconds (defaults to
-                             .75 second)
-       -max MAX              maximum delay between clips in seconds (defaults to
-                             1.25 second)
-       -t AUDIO_FILE, --audio-file AUDIO_FILE
-                             The temporary audio file to create. It defaults to
-                             clip.mp3. It can be a wav or mp3
-       -r, --redo            Uses lines even if there is already text in the
-                             subtitle. Otherwise only blank lines are used
-       -f--force             If there are multiple subtitles for a single line,
-                             concatenate them together instead of creating separate
-                             lines
-       -e, --extract         Extracts audio from a video that matches the subtitle
-                             times, separated by silence between clips, and saves
-                             it to the temporary file
-       -s, --subtitles       Takes the new .srt file(s), and adjusts them back to
-                             the original timing
-       -b, --both            Runs the extract option, pauses, then continues with
-                             the subtitles. This is the default action
-       -f, --force           This will indicate that clips should be concatenated
-                             together if Whisper generates multiplesubtitles for a
-                             single source line. Normally multiple lines are used.
-       -y, --overwrite       Automatically overwrite files that already exist
+  optional arguments:
+    -h, --help            show this help message and exit
+    -d DELAY, --delay DELAY
+                          delay between clips in seconds (defaults to 1.2
+                          seconds)
+    -t AUDIO_FILE, --audio-file AUDIO_FILE
+                          The temporary audio file to create. It defaults to
+                          clip.flac. It can be a wav, mp3, or flac
+    -r, --redo            Uses lines even if there is already text in the
+                          subtitle. Otherwise only blank lines are used
+    -f, --force           If there are multiple subtitles for a single line,
+                          concatenate them together instead of creating separate
+                          lines
+    -e, --extract         Extracts audio from a video that matches the subtitle
+                          times, separated by silence between clips, and saves
+                          it to the temporary file
+    -s, --subtitles       Takes the new .srt file(s), and adjusts them back to
+                          the original timing
+    -b, --both            Runs the extract option, pauses, then continues with
+                          the subtitles. This is the default action
+    --sync SYNC           This feature will take a subtitle file that is
+                          -roughly in sync and force the subtitle times to match
+                          with the source subtitle the result will overwrite the
+                          source
+    -y, -y, --overwrite   Automatically overwrite files that already exist
+    
